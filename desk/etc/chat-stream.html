@@ -1,0 +1,365 @@
+<html>
+
+<head>
+  <title>~paldev/lobby</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      font-size: 11pt;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    #head {
+      width: 460px;
+      max-width: 70vw;
+      margin: 2em auto;
+      font-family: sans-serif;
+      line-height: 1.3em;
+      overflow-y: auto;
+    }
+
+    #head pre {
+      font-family: monospace;
+      display: inline-block;
+      background-color: #eee;
+    }
+
+    #viewport {
+      /* fake viewport, to establish the height/width that everything else
+         is based on & avoid fixed heights anywhere */
+      height: 480px;
+      max-height: 80vh;
+      width: 480px;
+      max-width: 80vw;
+      position: relative;
+      border: 2px solid black;
+      box-sizing: border-box;
+      margin: 0 auto;
+      font-family: monospace;
+    }
+
+    .bad {
+      border-color: #f60 !important;
+    }
+
+    #viewport:after {
+      content: '';
+      position: absolute;
+      top: -3px;
+      left: -3px;
+      right: -3px;
+      bottom: -3px;
+      z-index: -1;
+    }
+
+    #bottomSnapper {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      height: 100%;
+    }
+
+    #scroller {
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+      max-height: 100%;
+    }
+
+    .message {
+      border-top: 1px solid black;
+      padding: 8px;
+      line-height: 1.3em;
+    }
+
+    .timestamp {
+      color: #bbb;
+    }
+
+    .author {
+      margin-left: 10px;
+      color: #777;
+    }
+
+    .author.comet {
+      cursor: pointer;
+      color: #888;
+    }
+
+    .metadata {}
+
+    .content {
+      margin-left: 10px;
+    }
+
+    a {
+      color: black;
+    }
+
+    pre {
+      background-color: #ddd;
+      margin: 0;
+      padding: 2px;
+    }
+
+    quote {
+      border-left: 2px solid black;
+      opacity: 0.8;
+    }
+
+    .message pre:nth-child(2) {
+      clear: left;
+      background-color: #eee;
+    }
+
+    #send {
+      border: 2px solid black;
+      border-top: 0;
+      margin-top: 2px;
+      width: 100%;
+      padding: 6px;
+    }
+  </style>
+  <script>
+    let scroller;
+    let viewport;
+    let input;
+    const base = 'https://urb.pal.dev/stream/lobby';
+    let known = [];
+
+    function prep() {
+      scroller = document.getElementById('scroller');
+      viewport = document.getElementById('viewport');
+      startStream();
+      input = document.getElementById('send')
+      input.focus();
+      input.addEventListener('keydown', (e) => {
+        if (e.key === "Enter" && input.value.length > 0) {
+          sendMessage(input.value);
+          input.value = '';
+        }
+      });
+    }
+
+    function startStream() {
+      let stream = new EventSource(
+        base + '.json',
+        { withCredentials: true }
+      );
+      stream.onopen = e => {
+        console.log('open');
+        showStreamStatus(stream.readyState);
+      }
+      stream.onmessage = e => {
+        handleUpdate(JSON.parse(e.data));
+        showStreamStatus(stream.readyState);
+      }
+      stream.onerror = e => {
+        console.error('EventSource error:', e);
+        console.log(stream.readyState);
+        showStreamStatus(stream.readyState);
+        window.setTimeout(() => {
+          if (stream.readyState !== EventSource.CLOSED) return;
+          console.log('reconnecting...');
+          stream.onopen = null;
+          stream.onmessage = null;
+          stream.onerror = null;
+          stream.close();
+          stream = null;
+          return startStream();
+        }, 10000);
+      }
+    }
+
+    function showStreamStatus(status) {
+      if (status === 1) {
+        viewport.setAttribute('class', '');
+      } else {
+        viewport.setAttribute('class', 'bad');
+      }
+    }
+
+    function showSendStatus(good) {
+      if (good) {
+        input.setAttribute('class', '');
+      } else {
+        input.setAttribute('class', 'bad');
+      }
+    }
+
+    function sendMessage(msg) {
+      fetch(base, {
+        method: 'POST',
+        credentials: 'include',
+        body: msg
+      })
+        .then(response => {
+          showSendStatus(response.status === 200);
+        });
+    }
+
+    function handleUpdate(data) {
+      console.log('event', data);
+      if (!data) return; // heartbeat
+      let messages = data;
+      if (!Array.isArray(messages)) messages = [data];
+      console.log('messages', messages);
+
+      for (i in messages) {
+        const msg = messages[i];
+        if (known.includes(msg.sent)) continue;
+        known.push(msg.sent);
+        appendMessage(renderPost(msg));
+      }
+    }
+
+    function renderPost(post) {
+      console.log('render post', post);
+      let body = document.createElement('div');
+      body.setAttribute('class', 'message');
+      let meta = document.createElement('span');
+      meta.setAttribute('class', 'metadata');
+      meta.appendChild(renderTimestamp(post.sent));
+      meta.appendChild(renderAuthor(post.author));
+      body.appendChild(meta);
+      body.appendChild(renderContents(post.content));
+      return body;
+    }
+
+    function renderTimestamp(when) {
+      const date = new Date(when);
+      const hors = "0" + date.getHours();
+      const mins = "0" + date.getMinutes();
+      const secs = "0" + date.getSeconds();
+      const time = `${hors.substr(-2)}:${mins.substr(-2)}:${secs.substr(-2)}`;
+
+      let body = document.createElement('span');
+      body.setAttribute('class', 'timestamp');
+      body.appendChild(document.createTextNode(time));
+      return body;
+    }
+
+    function cite(p) {
+      let c = p;
+      if (p.length === 28) {
+        c = '~' + p.slice(-13).replace('-', '^');
+      } else if (p.length > 28) {
+        c = p.slice(0, 7) + '_' + p.slice(p.length - 6)
+      }
+      return c;
+    }
+
+    function renderAuthor(author) {
+      let body = document.createElement('span');
+      if (author.length > 27) {
+        body.setAttribute('onClick', 'navigator.clipboard.writeText(author)');
+        body.setAttribute('class', 'author comet');
+      } else {
+        body.setAttribute('class', 'author');
+      }
+      body.appendChild(document.createTextNode(cite(author)));
+      return body;
+    }
+
+    function renderContents(content) {
+      let contents = [];
+      if (Array.isArray(content)) {
+        contents = content;
+      } else if (content.notice) {
+        contents = content.notice.pfix + ' ~??? ' + content.notice.sfix;
+      } else if (content.story) {
+        contents = content.story.inline;
+      }
+      let body = document.createElement('span');
+      body.setAttribute('class', 'content');
+      while (contents.length > 0) {
+        const c = contents[0];
+        contents = contents.slice(1);
+
+        if (typeof c === 'string') {
+          body.appendChild(document.createTextNode(c));
+        } else if (c.break === null) {
+          body.appendChild(document.createElement('br'));
+        } else if (c.ship) {
+          body.appendChild(document.createTextNode(' ' + cite(c.ship) + ' '));
+        } else if (c.link) {
+          let a = document.createElement('a');
+          a.setAttribute('href', c.link.href);
+          a.appendChild(document.createTextNode(c.link.content));
+          body.appendChild(a);
+        } else if (c.code || c.tag || c['inline-code']) {
+          let code = document.createElement('pre');
+          code.appendChild(document.createTextNode(c.code || c.tag || c['inline-code']));
+          body.appendChild(code);
+        } else if (c.italics) {
+          let text = document.createElement('i');
+          text.appendChild(renderContents(c.italics));
+          body.appendChild(text);
+        } else if (c.bold) {
+          let text = document.createElement('b');
+          text.appendChild(renderContents(c.bold));
+          body.appendChild(text);
+        } else if (c.strike) {
+          let text = document.createElement('strike');
+          text.appendChild(renderContents(c.strike));
+          body.appendChild(text);
+        } else if (c.blockquote) {
+          let text = document.createElement('quote');
+          text.appendChild(renderContents(c.blockquote));
+          body.appendChild(text);
+        } else if (c.block) {
+          body.appendChild(document.createTextNode(' ## '));
+        } else {
+          console.log('weird node', c);
+          body.appendChild(document.createTextNode(' [??] '));
+        }
+      }
+      return body;
+    }
+
+    function appendMessage(body) {
+      let scroller = document.getElementById('scroller');
+
+      const needScroll =
+        (scroller.scrollHeight - scroller.scrollTop === scroller.clientHeight);
+
+      scroller.appendChild(body);
+
+      if (needScroll) {
+        scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight;
+      }
+    }
+
+    window.onload = prep;
+
+  </script>
+</head>
+
+<body>
+
+  <div id="head">
+    Public gateway to
+    <pre>~paldev/lobby</pre>. Might be slow during busy hours.<br />
+    If you have an Urbit, just join there! It's in the
+    <pre>~paldev/group</pre>.<br />
+    Keep it civil, rabble-rousers will be banned.<br />
+    Hoon source lives <a href="https://github.com/fang-/suite/blob/master/app/chat-stream.hoon"
+      target="_blank">here</a>.
+  </div>
+
+  <div id="viewport" class="bad">
+    <div id="bottomSnapper">
+      <div id="scroller">
+        Loading...
+      </div>
+    </div>
+    <input id="send" type="text" maxlength="280" />
+  </div>
+
+</body>
+
+</html>
