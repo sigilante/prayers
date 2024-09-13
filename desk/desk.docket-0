@@ -1,8 +1,8 @@
 :~  title+'prayers'
     info+'anonymous requests for divine intervention from friends of friends'
     color+0xd1.d3d4
-    site+/prayer
-    base+'prayer'
+    site+/prayers
+    base+'prayers'
     version+[1 2 7]
     website+'https://pal.dev/suite/rumors'
     license+'MIT'
